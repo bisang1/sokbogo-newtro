@@ -1,4 +1,3 @@
-# deploy refresh
 import json
 import re
 from pathlib import Path
@@ -8,6 +7,10 @@ from typing import Dict, Any, List, Optional, Tuple
 import requests
 import streamlit as st
 from openai import OpenAI
+
+from youtube_trends import get_health_trends
+from youtube_topic_explorer_page import render_topic_explorer
+
 
 # =========================================================
 # 마지막 결과 저장 (로컬 실행 기준: 앱 껐다 켜도 남김)
@@ -57,7 +60,12 @@ client = OpenAI(api_key=api_key)
 # =========================================================
 # 채널
 # =========================================================
-CHANNELS = ["뉴트로(과거vs현재)", "속보고(증상→몸속→일상→희망)", "김앤리(연구소)"]
+CHANNELS = [
+    "뉴트로(과거vs현재)",
+    "속보고(장기-몸속-일상-희망)",
+    "김앤리(연구소)",
+    "트렌드 탐색"
+]
 
 # =========================================================
 # 김앤리 썸네일(커버) 이미지 프롬프트 템플릿 (사용자 제공 고정)
@@ -601,13 +609,29 @@ if "preset_idx" not in st.session_state:
 with st.expander("🧩 입력", expanded=True):
     st.session_state["channel"] = st.selectbox("채널", CHANNELS, index=CHANNELS.index(st.session_state["channel"]))
 
+    if st.session_state["channel"] == "트렌드 탐색":
+        render_topic_explorer()
+        st.stop()
+
     left, right = st.columns(2)
+
 
     with left:
         organ = st.selectbox("장기", list(PRESETS.keys()), index=list(PRESETS.keys()).index(st.session_state["organ"]))
+        
+        preset_list = PRESETS[organ]
+
         if organ != st.session_state["organ"]:
             st.session_state["organ"] = organ
             st.session_state["preset_idx"] = 0
+
+    # 트렌드 주제가 선택되었으면 우선 사용
+    if st.session_state.get("selected_topic"):
+        topic = st.session_state["selected_topic"]
+        st.info(f"트렌드 주제 적용: {topic}")
+    else:
+        topic = None
+
 
         preset_list = PRESETS[organ]
         disease_options = [p["disease"] for p in preset_list]
@@ -624,27 +648,60 @@ with st.expander("🧩 입력", expanded=True):
             base_year = st.selectbox("비교 기준 연도(뉴트로용)", BASE_YEARS, index=0)
         else:
             base_year = BASE_YEARS[0]
+            st.session_state["base_year"] = base_year
+
+
 
         tone = st.selectbox("영상 톤", TONES, index=TONES.index("다큐"))
 
-    with right:
-        keywords_ko = st.text_input(
-            "최근 건강 키워드(쉬운 한국어)",
-            value=preset_list[preset_idx]["keywords_ko"],
-            help="대본/출력은 한국어로만 생성됩니다.",
-        )
-
         years_back = st.slider("최근 근거 범위(년)", min_value=1, max_value=15, value=5)
-        max_papers = st.slider("자동 참고 논문 수(PubMed)", min_value=1, max_value=5, value=3)
+        max_papers = st.slider("자동 참고 논문 수(PubMed)", min_value=1, max_value=8, value=3)
         use_pubmed = st.toggle("최근 건강정보 자동 검색(PubMed) 사용", value=True)
 
-        show_pubmed_query = st.toggle("고급: PubMed 검색 쿼리 보기(영문)", value=False)
-        pubmed_query = preset_list[preset_idx]["pubmed_query"]
-        if show_pubmed_query:
-            st.code(pubmed_query)
+
+        with right:
+            keywords_ko = st.text_input(
+                "최근 건강 키워드(쉬운 한국어)",
+                value=preset_list[st.session_state["preset_idx"]]["keywords_ko"],
+                help="대본/출력은 한국어로만 생성됩니다.",
+            )
+
+            st.session_state["keywords_ko"] = keywords_ko
+
+            show_pubmed_query = st.toggle("고급: PubMed 검색 쿼리 보기(영문)")
+
+            # 트렌드 주제가 있으면 그것을 PubMed 쿼리로 사용
+            if st.session_state.get("selected_topic"):
+                pubmed_query = st.session_state["selected_topic"]
+            else:
+                pubmed_query = preset_list[preset_idx]["pubmed_query"]
+
+            if show_pubmed_query:
+                st.code(pubmed_query)
 
 st.divider()
 
+# 🔥 오늘 건강 트렌드
+if st.session_state.get("trend_topics"):
+    st.subheader("🔥 오늘 건강 트렌드")
+
+    for i, topic in enumerate(st.session_state["trend_topics"][:5], 1):
+        st.write(f"{i}. {topic}")
+
+    # 트렌드 주제 선택
+    if "selected_topic" not in st.session_state:
+        st.session_state["selected_topic"] = ""
+
+    trend_choice = st.selectbox(
+        "트렌드 주제 사용",
+        ["선택 안함"] + st.session_state["trend_topics"],
+        index=0,
+        key="trend_choice_selectbox"
+    )
+
+    if trend_choice != "선택 안함":
+        st.session_state["selected_topic"] = trend_choice
+        st.success(f"선택된 트렌드 주제: {trend_choice}")
 # =========================================================
 # 다음 주제 / 리셋 버튼
 # =========================================================
@@ -652,34 +709,60 @@ c1, c2 = st.columns(2)
 
 with c1:
     if st.button("🔄 다음 주제(새로 시작)", use_container_width=True):
+        youtube_api_key = st.secrets.get("YOUTUBE_API_KEY", "")
+        trend_data = get_health_trends(youtube_api_key)
+        st.session_state["trend_topics"] = trend_data.get("topics", [])
+
         st.session_state["last_output"] = None
         delete_last_result()
-        for k in ["channel", "organ", "preset_idx"]:
-            if k in st.session_state:
-                del st.session_state[k]
-        st.rerun()
 
-with c2:
-    if st.button("📌 마지막 결과 유지 + 입력만 리셋", use_container_width=True):
+
+
+
+
         for k in ["channel", "organ", "preset_idx"]:
             if k in st.session_state:
                 del st.session_state[k]
+
         st.rerun()
 
 # =========================================================
 # Generate
 # =========================================================
 if st.button("✅ 쇼츠 패키지 생성", use_container_width=True):
+
+
+        # UI 값 다시 읽기 (Generate 실행 시 안전하게 사용)
+    base_year = st.session_state.get("base_year", BASE_YEARS[0])
+    years_back = st.session_state.get("years_back", 5)
+    max_papers = st.session_state.get("max_papers", 3)
+    use_pubmed = st.session_state.get("use_pubmed", True)
+    tone = st.session_state.get("tone", "다큐")
+    keywords_ko = st.session_state.get("keywords_ko", "")
+
     evidence_articles: List[Dict[str, str]] = []
     evidence_err: Optional[str] = None
 
-    preset_list = PRESETS[st.session_state["organ"]]
+    
     disease_options = [p["disease"] for p in preset_list]
-    disease = disease_options[st.session_state["preset_idx"]]
+
+    # 트렌드 주제 우선 적용
+    if st.session_state.get("selected_topic"):
+        disease = st.session_state["selected_topic"]
+    else:
+        disease = disease_options[st.session_state["preset_idx"]]
+
     channel = st.session_state["channel"]
     organ = st.session_state["organ"]
 
-    if use_pubmed:
+    # PubMed 검색어 결정
+    if st.session_state.get("selected_topic"):
+        pubmed_query = st.session_state["selected_topic"]
+    else:
+        pubmed_query = preset_list[preset_idx]["pubmed_query"]
+
+
+    if st.session_state.get("use_pubmed", True):
         with st.spinner("최근 근거(PubMed) 수집 중..."):
             evidence_articles, evidence_err = get_recent_evidence(
                 pubmed_query=pubmed_query,
