@@ -10,6 +10,14 @@ from openai import OpenAI
 import os
 
 
+import sys
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SUBAPP_DIR = os.path.join(BASE_DIR, "sokbogo-newtro")
+
+if SUBAPP_DIR not in sys.path:
+    sys.path.insert(0, SUBAPP_DIR)
+
 
 from youtube_trends import get_health_trends
 from youtube_topic_explorer_page import render_topic_explorer
