@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "remotion:render": "node remotion/render.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -10,7 +11,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@remotion/cli": "^4.0.278",
     "dotenv": "^17.3.1",
-    "openai": "^6.22.0"
+    "openai": "^6.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.278"
   }
 }

@@ -1,3 +1,10 @@
 .env
 node_modules
 last_result.json
+.streamlit/secrets.toml
+.streamlit/local_settings.json
+outputs/
+results.json
+__pycache__/
+tmp_rewrite_streamlit_app.py
+*.pyc
